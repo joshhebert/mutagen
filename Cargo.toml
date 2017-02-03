@@ -1,0 +1,8 @@
+[package]
+name = "solver"
+version = "0.1.0"
+authors = ["Josh Hebert <jhebes7@gmail.com>"]
+
+[dependencies]
+toml = "0.2"
+
