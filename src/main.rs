@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-mod semver;
-use semver::Version;
+mod version;
+use version::Version;
 
 mod package_resolver;
 use package_resolver::Resolver;
@@ -24,8 +24,8 @@ impl<T : Resolver> Ecosystem<T>{
 
 
 struct Rule{
-    min_version : String,
-    max_version : String,
+    min_version : Version,
+    max_version : Version,
     owner       : String,
 }
 
@@ -36,7 +36,49 @@ struct Node {
 }
 impl Node{
     fn collapse_rules(&self) -> Rule {
-        return Rule{ max_version: "1".to_string(), min_version: "0".to_string(), owner: "nobody".to_string()};
+        // Iterate over all the max versions of the rules to find
+        // the lowest
+
+        //TODO test that we have rules
+
+        // Duplicate our rules so that we don't f*ck up the iterator
+        let mut lowest_max : &Version = &self.rules[0].max_version;
+        let mut iter = self.rules.iter();
+        loop {
+            match iter.next() {
+                Some(r) => {
+                    if r.max_version.cmp(&lowest_max) == -1 {
+                        lowest_max = &r.max_version;
+                    }
+                },
+                None => break,
+            }
+        }
+
+        let mut highest_min : &Version = &self.rules[0].min_version;
+        iter = self.rules.iter();
+        loop {
+            match iter.next() {
+                Some(r) => {
+                    if r.min_version.cmp(&highest_min) == 1 {
+                        highest_min = &r.min_version;
+                    }
+                },
+                None => break,
+            }
+        }
+
+        assert!( highest_min.cmp( lowest_max ) == -1 ||
+                 highest_min.cmp( lowest_max ) == 0
+               );
+
+
+        let max = Version{ data : lowest_max.data.clone() };
+        let min = Version{ data : highest_min.data.clone() };
+        return Rule{ max_version: max,
+                     min_version: min,
+                     owner: "nobody".to_string()
+                   };
     }
 }
 
@@ -62,8 +104,8 @@ fn add_rule<'a>( map  : &mut HashMap<String, Node>,
 
     // Create new rule
     // Abusing clone(), nbd
-    let new_rule : Rule = Rule{ min_version : min.to_string().clone(),
-                                max_version : max.to_string().clone(),
+    let new_rule : Rule = Rule{ min_version : Version::new(min.to_string()),
+                                max_version : Version::new(max.to_string()),
                                 owner       : from.to_string().clone()
                               };
 
@@ -85,6 +127,7 @@ fn add_rule<'a>( map  : &mut HashMap<String, Node>,
 ///
 /// Remove all rules owned by owner from target, and remove target as
 /// a dependency of owner
+///
 fn remove_rule<'a>( map : &mut HashMap<String, Node>, owner : &'a str, target : &'a str ){
     // Ensure that both from and to exist
     if !map.contains_key(owner) || !map.contains_key(target){
@@ -122,9 +165,20 @@ fn add_node<'a>( map  : &mut HashMap<String, Node>,
 
 
 fn main() {
-    // add_node( &mut map, "ROOT" );
-    // add_node( &mut map, "vim" );
-    // add_rule( &mut map, "ROOT", "vim", "1.0", "2.0" );
+    let mut map : HashMap<String,Node> = HashMap::new();
+    add_node( &mut map, "ROOT" );
+    add_node( &mut map, "vim" );
+    add_rule( &mut map, "ROOT", "vim", "1.0", "2.0" );
+    add_rule( &mut map, "ROOT", "vim", "1.4", "2.5" );
+    add_rule( &mut map, "ROOT", "vim", "0.5", "1.6" );
+
+    match map.get_mut("vim") {
+        Some(n) => {
+            let r = n.collapse_rules();
+            println!( "{}, {}", r.min_version.data, r.max_version.data );
+        },
+        None => {}
+    };
     // remove_rule( &mut map, "ROOT", "vim" );
 
     // println!("Testing");
@@ -134,9 +188,12 @@ fn main() {
     // }
 
 
-    let map : HashMap<String, Node> = HashMap::new();
-    let r = FilesystemResolver{};
-    let e = Ecosystem{ map : map, resolver : r };
+    // let map : HashMap<String, Node> = HashMap::new();
+    // let r = FilesystemResolver{};
+    // let e = Ecosystem{ map : map, resolver : r };
 
-    e.inject();
+    // e.inject();
+    // let v = Version::new("1.0.2.k-1".to_string());
+    // let v2 = Version::new("1.0.2.j-1".to_string());
+    // assert!( v.cmp(&v2) == 1 );
 }
