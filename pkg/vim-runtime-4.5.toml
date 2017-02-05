@@ -1,0 +1,10 @@
+[metadata]
+name    = "vim-runtime"
+version = "4.5"
+
+[depends]
+    [depends.glibc]
+        name = "glibc"
+        minversion = "2.0"
+        maxversion = "4.0"
+

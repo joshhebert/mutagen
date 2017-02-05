@@ -3,10 +3,6 @@ name    = "vim"
 version = "4.5"
 
 [depends]
-    [depends.linux]
-        name = "linux"
-        minversion = "4.6"
-        maxversion = "4.9"
     [depends.vim-runtime]
         name = "vim-runtime"
         minversion = "4.5"

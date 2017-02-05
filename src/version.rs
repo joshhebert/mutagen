@@ -5,10 +5,17 @@ pub struct Version{
     pub data : String
 }
 
+impl Clone for Version {
+    fn clone(&self) -> Version {
+        let ret:Version = Version{ data : self.data.clone() };
+        ret
+    }
+}
+
 impl Version {
-    pub fn new( value : String ) -> Version {
+    pub fn new<'a>( value : &'a str ) -> Version {
         Version {
-            data : value,
+            data : value.to_string(),
         }
     }
 

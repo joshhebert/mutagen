@@ -1,0 +1,10 @@
+[metadata]
+name    = "emacs"
+version = "3.0"
+
+[depends]
+    [depends.glibc]
+        name = "glibc"
+        minversion = "3.0"
+        maxversion = "5.0"
+

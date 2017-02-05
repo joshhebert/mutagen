@@ -1,0 +1,6 @@
+[metadata]
+name    = "glibc"
+version = "5.0"
+
+[depends]
+

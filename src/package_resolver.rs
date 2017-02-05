@@ -16,29 +16,30 @@ pub struct Metadata {
 }
 
 pub struct Dependency {
-    name        : String,
-    min_version : String,
-    max_version : String
+    pub name        : String,
+    pub min_version : String,
+    pub max_version : String
 }
 
 pub trait Resolver {
-    fn resolve( &self, name : String, version : String ) -> Result<Metadata, ResolverError>;
+    fn resolve<'a>( &self, name : &'a str, version : &'a str ) -> Result<Metadata, ResolverError>;
 }
 
 
 
-struct DummyResolver {}
+pub struct DummyResolver {}
 impl Resolver for DummyResolver{
-    fn resolve( &self, name : String, version : String ) -> Result<Metadata, ResolverError> {
+    fn resolve<'a>( &self, name : &'a str, version : &'a str ) -> Result<Metadata, ResolverError>{
         Ok(Metadata{ name : format!("{}", "vim"), version : format!("{}", "8.0"), deps : vec!() })
     }
 }
 
 pub struct FilesystemResolver {}
 impl Resolver for FilesystemResolver{
-    fn resolve( &self, name : String, version : String ) -> Result<Metadata, ResolverError> {
+    fn resolve<'a>( &self, name : &'a str, version : &'a str ) -> Result<Metadata, ResolverError>{
         let filename = format!("pkg/{}-{}.toml", name, version);
 
+        println!("Resolving {}", filename);
         let mut data = String::new();
         let mut f = File::open(filename).expect("Unable to open file");
         f.read_to_string(&mut data).expect("Unable to read string");
