@@ -3,10 +3,10 @@ use std::io::Read;
 
 extern crate toml;
 
-
+// TODO use this
 pub enum ResolverError {
-    NoFile,
-    BadSyntax,
+//    NoFile,
+//    BadSyntax,
 }
 
 pub struct Metadata {
@@ -25,21 +25,11 @@ pub trait Resolver {
     fn resolve<'a>( &self, name : &'a str, version : &'a str ) -> Result<Metadata, ResolverError>;
 }
 
-
-
-pub struct DummyResolver {}
-impl Resolver for DummyResolver{
-    fn resolve<'a>( &self, name : &'a str, version : &'a str ) -> Result<Metadata, ResolverError>{
-        Ok(Metadata{ name : format!("{}", "vim"), version : format!("{}", "8.0"), deps : vec!() })
-    }
-}
-
 pub struct FilesystemResolver {}
 impl Resolver for FilesystemResolver{
     fn resolve<'a>( &self, name : &'a str, version : &'a str ) -> Result<Metadata, ResolverError>{
         let filename = format!("pkg/{}-{}.toml", name, version);
 
-        println!("Resolving {}", filename);
         let mut data = String::new();
         let mut f = File::open(filename).expect("Unable to open file");
         f.read_to_string(&mut data).expect("Unable to read string");
