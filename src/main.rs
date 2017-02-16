@@ -1,37 +1,93 @@
-use std::collections::HashMap;
+#![feature(dedup_by)]
 
+use std::collections::HashMap;
+use std::ascii::AsciiExt;
 mod version;
 use version::Version;
 
 mod package_resolver;
 use package_resolver::Resolver;
 use package_resolver::FilesystemResolver;
-use package_resolver::DummyResolver;
 
 
-struct Ecosystem<T>{
+struct Context<T>{
     map : HashMap<String, Node>,
     resolver : T,
 }
 
-impl<T : Resolver> Ecosystem<T>{
-    fn new(rs : T) -> Ecosystem<T> {
-        let mut hm : HashMap<String, Node> = HashMap::new();
-        let mut e = Ecosystem { resolver : rs, map : hm };
+impl<T : Resolver> Context<T>{
+    fn new(rs : T) -> Context<T> {
+        let hm : HashMap<String, Node> = HashMap::new();
+        let mut e = Context { resolver : rs, map : hm };
         e.add_node("ROOT");
         return e;
     }
 
-    fn pin( &mut self, name : String, version : String ){
+    fn flatten( &self, start : String ) -> Vec<(String, Version)> {
+        // Start at the node identified by start and collect its
+        let mut ret : Vec<(String, Version)> = vec!();
+        let mut deps : Vec<String> = vec!();
+        match self.map.get( &start ) {
+            Some(n) => {
+                let mut node_deps_iter = n.deps.iter();
+                loop {
+                    match node_deps_iter.next() {
+                        Some(d) => {
+                            deps.push(d.to_owned());
+                        },
+                        None => break,
+                    }
+                }
+            },
+            None => {}
+        };
+
+        // Resolve the things at the top level
+        if deps.len() > 0 {
+            let mut i = deps.iter();
+            loop {
+                match i.next() {
+                    Some(s) => {
+                        let v = self.get_target_version( s.to_owned() );
+                        ret.push( (s.to_owned(),v) );
+                        // For each of these, recurse and append
+                        let subdeps = self.flatten( s.to_owned() );
+                        ret = [ret, subdeps].concat();
+                    },
+                    None => break,
+                }
+            }
+        }
+
+        // Remove duplicates in the return vector
+        ret.sort_by(|a,b| a.0.cmp(&(b.0)));
+        ret.dedup_by(|a,b| a.0.eq_ignore_ascii_case(&(b.0)));
+
+        return ret;
+    }
+
+    fn get_target_version( &self, name : String ) -> Version {
+        // Convert the name to a node
+        match self.map.get( &name ){
+            Some( n ) => {
+                return n.collapse_rules().max_version;
+            },
+            None => {
+                panic!("Node could not be resolved");
+            },
+        }
+    }
+
+    fn inject( &mut self, name : String, version : String ){
         // Check if package exists
 
         // Add an explicit rule requiring THIS version
         // of the package
         let rule = Rule{ owner: "ROOT".to_string(), min_version: Version::new(&version), max_version: Version::new(&version) };
-        self.inject( name, rule );
+        self.add_constraint( name, rule );
     }
 
-    fn inject(&mut self, name : String, new_rule : Rule){
+    fn add_constraint(&mut self, name : String, new_rule : Rule){
         // Test if this package exists in the map already
         println!("Injecting {}", name );
         // I KNOW this can be simplified TODO
@@ -50,7 +106,6 @@ impl<T : Resolver> Ecosystem<T>{
         };
 
         // If the node does not exist, create it
-        // Stupid borrow checker
         if !node_found {
             self.add_node( &name );
         }
@@ -126,7 +181,7 @@ impl<T : Resolver> Ecosystem<T>{
                             println!("Working on dep {}", r.name );
                             // Force the target node to re-evaluate its life
                             let new_rule = Rule{ owner : name.to_string(), min_version : Version::new(&(r.min_version)), max_version : Version::new(&(r.max_version)) };
-                            self.inject( r.name.to_string(), new_rule );
+                            self.add_constraint( r.name.to_string(), new_rule );
                         },
                         None => break,
                     }
@@ -137,13 +192,10 @@ impl<T : Resolver> Ecosystem<T>{
         }
     }
 
-    ///
-    /// This function bothers me a lot, as it doesn't elegantly check
-    /// for key existance and *then* update, so we end up basically
-    /// testing twice. Furthermore, I'd prefer that owner of Rule be a
-    /// direct reference to the node, rather than a string that has to be
-    /// looked up every time.
-    ///
+    // Private helper functions
+    ///////////////////////////////
+
+    // TODO use entry API here
     fn add_rule<'a>( &mut self, from : &'a str, to : &'a str, min : &'a str, max : &'a str ) {
         // Ensure that both from and to exist
         if !self.map.contains_key(from) || !self.map.contains_key(to){
@@ -267,36 +319,28 @@ impl Node{
 }
 
 fn main() {
-
-    // e.add_node( "ROOT" );
-    // e.add_node( "vim" );
-    // e.add_rule( "ROOT", "vim", "1.0", "2.0" );
-    // e.add_rule( "ROOT", "vim", "1.4", "2.5" );
-    // e.add_rule( "ROOT", "vim", "0.5", "1.6" );
-
-    // match e.map.get_mut("vim") {
-    //     Some(n) => {
-    //         let r = n.collapse_rules();
-    //         println!( "{}, {}", r.min_version.data, r.max_version.data );
-    //     },
-    //     None => {}
-    // };
-    // remove_rule( &mut map, "ROOT", "vim" );
+    let mut c = Context::new(FilesystemResolver{});
+    c.inject("emacs".to_string(), "3.0".to_string());
+    c.inject("vim".to_string(), "4.5".to_string());
 
 
 
-    // let map : HashMap<String, Node> = HashMap::new();
-    // let r = FilesystemResolver{};
-    // let e = Ecosystem{ map : map, resolver : r };
-    let mut e = Ecosystem::new(FilesystemResolver{});
-    e.pin("emacs".to_string(), "3.0".to_string());
-    e.pin("vim".to_string(), "4.5".to_string());
     println!("Testing");
-    match e.map.get_mut("ROOT") {
+    match c.map.get_mut("ROOT") {
         Some(n) => println!("{}", n.deps.len()),
         None => return
     }
-    // let v = Version::new("1.0.2.k-1".to_string());
-    // let v2 = Version::new("1.0.2.j-1".to_string());
-    // assert!( v.cmp(&v2) == 1 );
+    let d = c.flatten("ROOT".to_string());
+
+
+    println!("Resolved tree:");
+    let mut i = d.iter();
+    loop {
+        match i.next() {
+            Some(r) => {
+                println!("{}", r.0);
+            },
+            None => break,
+        }
+    }
 }
