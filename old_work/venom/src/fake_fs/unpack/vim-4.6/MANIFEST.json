@@ -1,0 +1,8 @@
+{
+    "name" : "vim",
+    "version" : "4.6",
+    "depends" : [
+        "vim-libs",
+        "vim-doc"
+    ]
+}

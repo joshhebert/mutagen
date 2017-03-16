@@ -12,3 +12,8 @@ those give it a significant speed advantage. I do know for a fact that it makes
 everything messy to maintain and debug. Once I finish my Rust implementation, I
 might do some testing to evaluate if it's worth threading it, in which case I'll
 use some of the architecture designed here to do so.
+
+## Venom
+venom was the intial foray into dependency resolution and filesystem mutation.
+It doesn't leverage overlays like mutagen does, instead jsut symlinking stuff
+to where it needs to be in the filesystem. Not very good.

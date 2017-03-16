@@ -1,0 +1,8 @@
+{
+    "name" : "emacs",
+    "version" : "2.0",
+    "depends" : [
+        "emacs-libs",
+        "emac-doc"
+    ]
+}

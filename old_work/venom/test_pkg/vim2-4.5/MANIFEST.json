@@ -1,0 +1,8 @@
+{
+    "name" : "vim2",
+    "version" : "4.5",
+    "depends" : [
+        { "name":"vim-libs", "minversion":"4.8", "maxversion":"4.9" },
+        { "name":"vim-doc", "minversion":"4.8", "maxversion":"4.9" }
+    ]
+}
