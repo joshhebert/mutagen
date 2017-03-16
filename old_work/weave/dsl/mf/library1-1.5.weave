@@ -1,0 +1,5 @@
+{"Target" :
+    { "Name" : "library1", "Version" : "1.5" },
+"Require" : [
+    { "Name" : "library4", "MinVersion" : "2.0", "MaxVersion" : "2.0" }
+]}

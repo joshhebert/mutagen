@@ -1,0 +1,15 @@
+[Subfilesystems]
+    paths = [
+        "./core-system",
+        "./mutagen/busybox",
+        "./mutagen/init",
+        "./mutagen/libintl",
+        "./mutagen/linux-pam",
+        "./mutagen/musl-libc",
+        "./mutagen/ncurses",
+        "./mutagen/ncurses-libs",
+        "./mutagen/openrc",
+        "./mutagen/shadow",
+        "./mutagen/ubase"
+    ]
+

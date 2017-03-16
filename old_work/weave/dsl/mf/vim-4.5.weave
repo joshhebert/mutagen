@@ -1,0 +1,6 @@
+{"Target" :
+    { "Name" : "vim", "Version" : "4.5" },
+"Require" : [
+    { "Name" : "library1", "MinVersion" : "1.0", "MaxVersion" : "1.5" },
+    { "Name" : "library2", "MinVersion" : "2.0", "MaxVersion" : "^" }
+]}
