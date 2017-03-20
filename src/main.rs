@@ -1,6 +1,3 @@
-// Attributes
-#![feature(dedup_by)]
-
 mod solver;
 use solver::context::Context;
 use solver::package_resolver::FilesystemResolver;
@@ -8,6 +5,8 @@ use solver::package_resolver::FilesystemResolver;
 
 mod archive;
 use archive::xz::extract_xz;
+
+mod fs;
 
 use std::path::Path;
 
