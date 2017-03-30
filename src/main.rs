@@ -7,7 +7,8 @@ mod archive;
 use archive::xz::extract_xz;
 
 mod fs;
-
+use fs::mutagen_fs::MutagenFilesystem;
+use fs::mutagen_fs::Tag;
 use std::path::Path;
 
 fn example_solver_use(){
@@ -29,6 +30,10 @@ fn example_solver_use(){
 
 
 fn main() {
-    example_solver_use();
-    extract_xz("./vim.tar.xz".to_string(), Path::new("/tmp/"));
+    //example_solver_use();
+    //extract_xz("./vim.tar.xz".to_string(), Path::new("/tmp/"));
+    let mut fs = MutagenFilesystem::new();
+    fs.inject(Path::new("/home/josh/devel/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
+
+    fs.lookup_file(Path::new("old/a/b"));
 }
