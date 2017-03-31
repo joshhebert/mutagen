@@ -2,6 +2,8 @@ extern crate fuse;
 extern crate libc;
 extern crate walkdir;
 extern crate time;
+use std::os::linux::fs::MetadataExt;
+use std::os::unix::fs::FileTypeExt;
 use self::time::Timespec;
 use std::fs::metadata;
 use std::collections::HashMap;
@@ -15,6 +17,7 @@ use std::collections::hash_map::Entry::Occupied;
 use std::path::PathBuf;
 use self::libc::ENOENT;
 use std::mem;
+use std::fs::FileType as StdFileType;
 use self::fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry,
 ReplyDirectory};
 
@@ -61,6 +64,65 @@ pub struct MutagenFilesystem {
     // that are in the same directory to the same virtual inode
     mapping : HashMap<PathBuf, u64>,
     ino_counter : u64,
+}
+
+trait FileTypeConversion {
+    fn from_std_filetype( t : StdFileType ) -> FileType;
+}
+impl FileTypeConversion for FileType {
+    fn from_std_filetype( t : StdFileType ) -> FileType {
+        if t.is_file() {
+            return FileType::RegularFile;
+        }else if t.is_dir(){
+            return FileType::Directory;
+        }else if t.is_symlink() {
+            return FileType::Symlink;
+        }else if t.is_block_device() {
+            return FileType::BlockDevice;
+        }else if t.is_char_device() {
+            return FileType::CharDevice;
+        }else if t.is_fifo() || t.is_socket() {
+            return FileType::NamedPipe;
+        // If it doesn't match anything here, Rust's API has changed and this
+        // needs to be updated
+        } else {
+            panic!("Rust API change has broken FileTypes");
+        }
+    }
+}
+
+trait FileAttrFromTarget {
+    fn from_target(target : &Path) -> Result<FileAttr, MutagenFilesystemError>;
+}
+
+impl FileAttrFromTarget for FileAttr {
+    fn from_target( target : &Path ) -> Result<FileAttr, MutagenFilesystemError> {
+        if target.exists() {
+            let meta = target.metadata().unwrap();
+
+            let fa = FileAttr{
+                ino : meta.st_ino(),
+                size : meta.st_size(),
+                blocks : meta.st_blocks(),
+                atime : Timespec::new(meta.st_atime(), meta.st_atime_nsec() as i32),
+                mtime : Timespec::new(meta.st_mtime(), meta.st_mtime_nsec() as i32),
+                ctime : Timespec::new(meta.st_ctime(), meta.st_ctime_nsec() as i32),
+                // OS X only
+                crtime : Timespec::new(0, 0),
+                kind : FileType::from_std_filetype(meta.file_type()),
+                perm : meta.st_mode() as u16,
+                nlink : meta.st_nlink() as u32,
+                uid : meta.st_uid() as u32,
+                gid : meta.st_gid() as u32,
+                rdev : meta.st_rdev() as u32,
+                // OS X only
+                flags : 0,
+            };
+
+            return Ok(fa);
+        }
+        return Err(MutagenFilesystemError::FileDoesNotExist);
+    }
 }
 
 impl MutagenFilesystem {
@@ -277,34 +339,55 @@ impl Filesystem for MutagenFilesystem {
             let ttl = Timespec::new(1, 0);
             reply.attr(&ttl, &attr);
         }
-
-        // match self.attrs.get(&ino) {
-        //     Some(attr) => {
-        //         let ttl = Timespec::new(1, 0);
-        //         reply.attr(&ttl, attr);
-        //     }
-        //     None => reply.error(ENOENT),
-        // };
     }
 
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("lookup(parent={}, name={})", parent, name.to_str().unwrap());
-        reply.error(ENOENT);
 
-        // let inode = match self.inodes.get(name.to_str().unwrap()) {
-        //     Some(inode) => inode,
-        //     None => {
-        //         reply.error(ENOENT);
-        //         return;
-        //     }
-        // };
-        // match self.attrs.get(inode) {
-        //     Some(attr) => {
-        //         let ttl = Timespec::new(1, 0);
-        //         reply.entry(&ttl, attr, 0);
-        //     }
-        //     None => reply.error(ENOENT),
-        // };
+        let inode : u64;
+        match self.dir_vfs.get(&parent) {
+            Some(p) => match p.entries.get(name) {
+                Some(e) => inode = e.ino,
+                None => {
+                    reply.error(ENOENT);
+                    return;
+                },
+            },
+            None => {
+                reply.error(ENOENT);
+                return;
+            },
+        };
+
+        // Having this inode, we can resolve it to a real path if it's a file
+        println!("ino = {}", inode);
+        if self.is_file(inode) {
+            let real_path : PathBuf;
+            match self.file_vfs.get(&inode) {
+                Some(f) => {
+                    real_path = f.true_path.clone();
+                }
+                None => {
+                    reply.error(ENOENT);
+                    return;
+                },
+            };
+
+
+            let attr = FileAttr::from_target( real_path.as_path() ).unwrap();
+            let ttl = Timespec::new(1, 0);
+            reply.entry(&ttl, &attr, 0);
+
+        // If this is a dir, we provide generic attrs, as the directory isn't
+        // real
+        }else if self.is_dir( inode ) {
+            let mut attr: FileAttr = unsafe { mem::zeroed() };
+            attr.ino = inode;
+            attr.kind = FileType::Directory;
+            attr.perm = 0o777;
+            let ttl = Timespec::new(1, 0);
+            reply.entry(&ttl, &attr, 0);
+        }
     }
 
     fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, size: u32, reply: ReplyData) {
@@ -323,18 +406,26 @@ impl Filesystem for MutagenFilesystem {
     fn readdir(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, mut reply: ReplyDirectory) {
         println!("readdir(ino={}, fh={}, offset={})", ino, fh, offset);
 
-        let inodes = self.read_dir_by_ino( ino ).unwrap();
-        let mut offsetctr = 2;
-        for i in inodes {
-            if self.is_dir( i.1 ){
-                reply.add( i.1, offsetctr, FileType::Directory, i.0 ); 
-            }else if self.is_file( i.1 ){
-                reply.add( i.1, offsetctr, FileType::RegularFile, i.0 ); 
+        // if( ino != 1 ){
+        //     reply.error(ENOENT);
+        //     return;
+        // }
+
+        if( offset == 0 ){
+            reply.add(1, 0, FileType::Directory, ".");
+            reply.add(1, 1, FileType::Directory, "..");
+
+            let inodes = self.read_dir_by_ino( ino ).unwrap();
+            println!("Inodes in dir = {:?}", inodes);
+            let mut offsetctr = 2;
+            for i in inodes {
+                if self.is_dir( i.1 ){
+                    reply.add( i.1, offsetctr, FileType::Directory, i.0 );
+                }else if self.is_file( i.1 ){
+                    reply.add( i.1, offsetctr, FileType::RegularFile, i.0 );
+                }
             }
         }
-
-        reply.add(1, 0, FileType::Directory, ".");
-        reply.add(1, 1, FileType::Directory, "..");
 
         reply.ok();
     }
@@ -345,7 +436,7 @@ pub fn mount_fs() {
     let mut fs = MutagenFilesystem::new();
 
     fs.inject(Path::new("/home/spooky/dev/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
-    // fs.inject(Path::new("/home/josh/devel/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
+    fs.inject(Path::new("/home/spooky/dev/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
 
     // println!("{:?}", fs.resolve_file_by_ino(12));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system/fuse_logic.py")));
