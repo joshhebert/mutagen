@@ -2,6 +2,8 @@ extern crate fuse;
 extern crate libc;
 extern crate walkdir;
 extern crate time;
+use std::fs::File;
+use std::io::Read;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::FileTypeExt;
 use self::time::Timespec;
@@ -328,10 +330,11 @@ impl MutagenFilesystem {
 
 impl Filesystem for MutagenFilesystem {
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        println!("getattr(ino={})", ino);
         if self.is_dir(ino){
             // In the case of a dir, we "make up" some data, as it's
             // a virtual... thing
+            // This isn't good in the long term, as we don't want every dir
+            // owned by root with 777 permissions
             let mut attr: FileAttr = unsafe { mem::zeroed() };
             attr.ino = ino;
             attr.kind = FileType::Directory;
@@ -342,8 +345,6 @@ impl Filesystem for MutagenFilesystem {
     }
 
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        println!("lookup(parent={}, name={})", parent, name.to_str().unwrap());
-
         let inode : u64;
         match self.dir_vfs.get(&parent) {
             Some(p) => match p.entries.get(name) {
@@ -360,7 +361,6 @@ impl Filesystem for MutagenFilesystem {
         };
 
         // Having this inode, we can resolve it to a real path if it's a file
-        println!("ino = {}", inode);
         if self.is_file(inode) {
             let real_path : PathBuf;
             match self.file_vfs.get(&inode) {
@@ -374,12 +374,14 @@ impl Filesystem for MutagenFilesystem {
             };
 
 
-            let attr = FileAttr::from_target( real_path.as_path() ).unwrap();
+            let mut attr = FileAttr::from_target( real_path.as_path() ).unwrap();
+            attr.ino = inode;
             let ttl = Timespec::new(1, 0);
             reply.entry(&ttl, &attr, 0);
 
         // If this is a dir, we provide generic attrs, as the directory isn't
         // real
+        // Again, not good in the long term
         }else if self.is_dir( inode ) {
             let mut attr: FileAttr = unsafe { mem::zeroed() };
             attr.ino = inode;
@@ -391,32 +393,36 @@ impl Filesystem for MutagenFilesystem {
     }
 
     fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, size: u32, reply: ReplyData) {
-        println!("read(ino={}, fh={}, offset={}, size={})", ino, fh, offset, size);
-
-        // for (key, &inode) in &self.inodes {
-        //     if inode == ino {
-        //         let value = &self.tree[key];
-        //         reply.data(value.pretty().to_string().as_bytes());
-        //         return;
-        //     }
-        // }
-        reply.error(ENOENT);
+        // Having this inode, we can resolve it to a real path if it's a file
+        if self.is_file(ino) {
+            let real_path : PathBuf;
+            match self.file_vfs.get(&ino) {
+                Some(f) => {
+                    real_path = f.true_path.clone();
+                }
+                None => {
+                    reply.error(ENOENT);
+                    return;
+                },
+            };
+            let mut f = File::open(real_path.as_path()).unwrap();
+            let mut bytes : Vec<u8> = vec!();
+            let read = f.read_to_end( &mut bytes );
+            // Push a null terminator, as most things get mad if it isn't there
+            bytes.push('\0' as u8);
+            reply.data(bytes.as_slice());
+            return;
+        }else if self.is_dir( ino ) {
+            reply.error(ENOENT);
+        }
     }
 
     fn readdir(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, mut reply: ReplyDirectory) {
-        println!("readdir(ino={}, fh={}, offset={})", ino, fh, offset);
-
-        // if( ino != 1 ){
-        //     reply.error(ENOENT);
-        //     return;
-        // }
-
-        if( offset == 0 ){
+        if offset == 0 {
             reply.add(1, 0, FileType::Directory, ".");
             reply.add(1, 1, FileType::Directory, "..");
 
             let inodes = self.read_dir_by_ino( ino ).unwrap();
-            println!("Inodes in dir = {:?}", inodes);
             let mut offsetctr = 2;
             for i in inodes {
                 if self.is_dir( i.1 ){
@@ -438,7 +444,7 @@ pub fn mount_fs() {
     fs.inject(Path::new("/home/spooky/dev/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
     fs.inject(Path::new("/home/spooky/dev/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
 
-    // println!("{:?}", fs.resolve_file_by_ino(12));
+    println!("{:?}", fs.read_dir_by_ino(1));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system/fuse_logic.py")));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system")));
 
