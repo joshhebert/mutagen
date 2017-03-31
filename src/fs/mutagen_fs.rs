@@ -26,10 +26,12 @@ pub enum Type {
     File,
 }
 
+#[derive (Clone)]
 pub struct Tag {
     pub owner_name      : String,
     pub owner_version   : String,
 }
+
 
 struct Entry {
     ino        : u64,
@@ -73,41 +75,18 @@ impl MutagenFilesystem {
         };
 
         m.dir_vfs.insert(1, e);
+        let mut root = PathBuf::new();
+        root.push("/");
+        m.mapping.insert(PathBuf::new(), 1);
+        m.mapping.insert(root, 1);
 
         return m;
     }
 
 
-    fn load_dir(&mut self, name : OsString, local_path : PathBuf, entry : &DirEntry ) {
-        // println!("Testing {}", local_path);
-
-
-        // Find parent ino and insert it there
-
-        let ino : u64;
-        match self.mapping.entry(local_path) {
-            Occupied(mut o) => ino = o.get_mut().clone(),
-            Vacant(v) => {
-                ino = self.ino_counter + 1;
-                self.ino_counter += 1;
-                v.insert(ino);
-            }
-        }
-
-        match self.dir_vfs.entry(ino) {
-            Occupied(mut o) => (),
-            Vacant(v) => {
-                let mut n : DirNode = DirNode {
-                    entries : HashMap::new(),
-                };
-                v.insert(n);
-            }
-        }
-    }
-
-
-    fn load_file(&mut self, name : OsString, parent_dir : PathBuf, true_path : PathBuf, tag : Tag, entry : DirEntry ) {
+    fn map_inode( &mut self, parent_dir : PathBuf, entry_type : Type, name : OsString ) -> u64 {
         // Figure out what the ino of the parent dir is
+        println!("Mapping {:?} into {:?}", name, parent_dir );
         let parent_ino : u64;
         match self.mapping.entry(parent_dir) {
             Occupied(mut o) => parent_ino = o.get_mut().clone(),
@@ -134,7 +113,35 @@ impl MutagenFilesystem {
             Vacant(v) => panic!("Unsupported"),
         }
 
-        match self.file_vfs.entry(self.ino_counter){
+        let ret = self.ino_counter;
+        self.ino_counter += 1;
+
+        return ret;
+    }
+
+    fn load_dir(&mut self, name : OsString, parent_dir : PathBuf, entry : DirEntry ) {
+        let ino = self.map_inode( parent_dir.clone(), Type::Dir, name.clone() );
+
+        let full_path = &parent_dir.join(Path::new(&name));
+        println!("Inserting {:?} into mapping", full_path);
+        self.mapping.insert( full_path.clone(), ino );
+
+        match self.dir_vfs.entry(ino) {
+            Occupied(mut o) => (),
+            Vacant(v) => {
+                let mut n : DirNode = DirNode {
+                    entries : HashMap::new(),
+                };
+                v.insert(n);
+            }
+        }
+    }
+
+
+    fn load_file(&mut self, name : OsString, parent_dir : PathBuf, true_path : PathBuf, tag : Tag, entry : DirEntry ) {
+        let ino = self.map_inode( parent_dir, Type::Dir, name );
+
+        match self.file_vfs.entry(ino){
             Occupied(o) => panic!("File conflict"),
             Vacant(v) => {
                 let e = FileNode{
@@ -144,8 +151,9 @@ impl MutagenFilesystem {
                 v.insert(e);
             }
         }
-        self.ino_counter += 1;
     }
+
+
     /**
      * Provided with a path (presumably containing a package), index it into
      * this filesystem under the provided tag
@@ -155,7 +163,8 @@ impl MutagenFilesystem {
         for entry in WalkDir::new( p ) {
 
             let entry = entry.unwrap();
-            let entry_path = entry.path();
+            let entry_clone = entry.clone();
+            let entry_path = entry_clone.path();
             let true_path;
             if entry_path.is_absolute(){
                 true_path = entry_path;
@@ -178,9 +187,7 @@ impl MutagenFilesystem {
             let mut depth = entry.depth();
             let mut iter = true_path.components().rev();
 
-            if( depth == 1){
-                parent_dir.push(Path::new("/"));
-            }else{
+            if depth > 0 {
                 // Discard first element to not include the actual name
                 // of the file
                 iter.next();
@@ -198,13 +205,15 @@ impl MutagenFilesystem {
                     parent_dir.push(Path::new(&c));
                     parent_dir.push(p);
                 }
+
+                if true_path.is_dir(){
+                    self.load_dir( name, parent_dir, entry );
+                }else if true_path.is_file(){
+                    self.load_file( name, parent_dir, true_path.to_path_buf(), tag.clone(), entry );
+                }
             }
 
 
-            if true_path.is_dir(){
-            }else if true_path.is_file(){
-                self.load_file( name, parent_dir, true_path.into_path_buf(), tag, &entry );
-            }
         }
     }
 
@@ -212,22 +221,30 @@ impl MutagenFilesystem {
 
     }
 
-    // pub fn resolve_by_ino( &self, ino : u64 ) -> Result<PathBuf, MutagenFilesystemError> {
-    //     let true_path : Result<PathBuf, MutagenFilesystemError> = match self.vfs.get(ino) {
-    //         Some( node ) => {
-    //             match node.entries.get( &base ) {
-    //                 Some( e ) => {
-    //                     let mut b = PathBuf::new();
-    //                     b.push(&e.true_loc);
-    //                     Ok(b)
-    //                 },
-    //                 None => Err(MutagenFilesystemError::FileDoesNotExist),
-    //             }
-    //         },
-    //         None => Err(MutagenFilesystemError::DirDoesNotExist),
-    //     };
-    //     return true_path;
-    // }
+    pub fn resolve_file_by_ino( &self, ino : u64 ) -> Result<PathBuf, MutagenFilesystemError> {
+        let true_path : Result<PathBuf, MutagenFilesystemError> = match self.file_vfs.get(&ino) {
+            Some( node ) => {
+                let mut b = PathBuf::new();
+                b.push(&(node.true_path));
+                Ok(b)
+            },
+            None => Err(MutagenFilesystemError::FileDoesNotExist),
+        };
+        return true_path;
+    }
+    pub fn read_dir_by_ino( &self, ino : u64 ) -> Result<Vec<(OsString, u64)>, MutagenFilesystemError> {
+        let contents : Result<Vec<(OsString,u64)>, MutagenFilesystemError> = match self.dir_vfs.get(&ino) {
+            Some( node ) => {
+                let mut v= vec!();
+                for name in node.entries.keys() {
+                    v.push((name.clone(), node.entries.get(name).unwrap().ino));
+                }
+                Ok(v)
+            },
+            None => Err(MutagenFilesystemError::FileDoesNotExist),
+        };
+        return contents;
+    }
 }
 
 impl Filesystem for MutagenFilesystem {
@@ -306,15 +323,15 @@ impl Filesystem for MutagenFilesystem {
 pub fn mount_fs() {
     let mut fs = MutagenFilesystem::new();
 
-    fs.inject(Path::new("/home/josh/devel/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
-    fs.inject(Path::new("/home/josh/devel/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
+    fs.inject(Path::new("/home/spooky/dev/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
+    // fs.inject(Path::new("/home/josh/devel/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
 
-    // println!("{:?}", fs.lookup(Path::new("old/a/b")));
+    println!("{:?}", fs.read_dir_by_ino(1));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system/fuse_logic.py")));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system")));
 
-    let mountpoint = "./mount";
+    // let mountpoint = "./mount";
 
-    fuse::mount(fs, &mountpoint, &[]).expect("Couldn't mount filesystem");
+    // fuse::mount(fs, &mountpoint, &[]).expect("Couldn't mount filesystem");
 }
 
