@@ -1,6 +1,8 @@
 extern crate fuse;
 extern crate libc;
 extern crate walkdir;
+extern crate time;
+use self::time::Timespec;
 use std::fs::metadata;
 use std::collections::HashMap;
 use self::walkdir::WalkDir;
@@ -12,6 +14,7 @@ use std::collections::hash_map::Entry::Vacant;
 use std::collections::hash_map::Entry::Occupied;
 use std::path::PathBuf;
 use self::libc::ENOENT;
+use std::mem;
 use self::fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry,
 ReplyDirectory};
 
@@ -221,6 +224,20 @@ impl MutagenFilesystem {
 
     }
 
+    pub fn is_dir( &self, ino : u64 ) -> bool {
+        return match self.dir_vfs.get(&ino) {
+            Some( node ) => true,
+            None => false,
+        };
+    }
+
+    pub fn is_file( &self, ino : u64 ) -> bool {
+        return match self.file_vfs.get(&ino) {
+            Some( node ) => true,
+            None => false,
+        };
+    }
+
     pub fn resolve_file_by_ino( &self, ino : u64 ) -> Result<PathBuf, MutagenFilesystemError> {
         let true_path : Result<PathBuf, MutagenFilesystemError> = match self.file_vfs.get(&ino) {
             Some( node ) => {
@@ -250,7 +267,16 @@ impl MutagenFilesystem {
 impl Filesystem for MutagenFilesystem {
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         println!("getattr(ino={})", ino);
-        reply.error(ENOENT);
+        if self.is_dir(ino){
+            // In the case of a dir, we "make up" some data, as it's
+            // a virtual... thing
+            let mut attr: FileAttr = unsafe { mem::zeroed() };
+            attr.ino = ino;
+            attr.kind = FileType::Directory;
+            attr.perm = 0o777;
+            let ttl = Timespec::new(1, 0);
+            reply.attr(&ttl, &attr);
+        }
 
         // match self.attrs.get(&ino) {
         //     Some(attr) => {
@@ -297,25 +323,20 @@ impl Filesystem for MutagenFilesystem {
     fn readdir(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, mut reply: ReplyDirectory) {
         println!("readdir(ino={}, fh={}, offset={})", ino, fh, offset);
 
+        let inodes = self.read_dir_by_ino( ino ).unwrap();
+        let mut offsetctr = 2;
+        for i in inodes {
+            if self.is_dir( i.1 ){
+                reply.add( i.1, offsetctr, FileType::Directory, i.0 ); 
+            }else if self.is_file( i.1 ){
+                reply.add( i.1, offsetctr, FileType::RegularFile, i.0 ); 
+            }
+        }
 
-        // if ino == 1 {
-        //     if offset == 0 {
-        //         reply.add(1, 0, FileType::Directory, ".");
-        //         reply.add(1, 1, FileType::Directory, "..");
-        //         for (key, &inode) in &self.inodes {
-        //             if inode == 1 {
-        //                 continue;
-        //             }
-        //             let offset = inode; // hack
-        //             println!("\tkey={}, inode={}, offset={}", key, inode, offset);
-        //             reply.add(inode, offset, FileType::RegularFile, key);
-        //         }
-        //     }
-        //     reply.ok();
-        // } else {
-        //     reply.error(ENOENT);
-        // }
-        reply.error(ENOENT);
+        reply.add(1, 0, FileType::Directory, ".");
+        reply.add(1, 1, FileType::Directory, "..");
+
+        reply.ok();
     }
 }
 
@@ -326,12 +347,12 @@ pub fn mount_fs() {
     fs.inject(Path::new("/home/spooky/dev/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
     // fs.inject(Path::new("/home/josh/devel/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
 
-    println!("{:?}", fs.read_dir_by_ino(1));
+    // println!("{:?}", fs.resolve_file_by_ino(12));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system/fuse_logic.py")));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system")));
 
-    // let mountpoint = "./mount";
+    let mountpoint = "./mount";
 
-    // fuse::mount(fs, &mountpoint, &[]).expect("Couldn't mount filesystem");
+    fuse::mount(fs, &mountpoint, &[]).expect("Couldn't mount filesystem");
 }
 
