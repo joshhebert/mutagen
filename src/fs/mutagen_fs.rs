@@ -21,7 +21,7 @@ use self::libc::ENOENT;
 use std::mem;
 use std::fs::FileType as StdFileType;
 use self::fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry,
-ReplyDirectory};
+ReplyDirectory, ReplyEmpty, ReplyOpen};
 
 #[derive(Debug)]
 pub enum MutagenFilesystemError {
@@ -341,7 +341,30 @@ impl Filesystem for MutagenFilesystem {
             attr.perm = 0o777;
             let ttl = Timespec::new(1, 0);
             reply.attr(&ttl, &attr);
+        // Otherwise, clone data from the real file, substituting the ino
+        // number
+        }else if self.is_file(ino) {
+            let real_path : PathBuf;
+            match self.file_vfs.get(&ino) {
+                Some(f) => {
+                    real_path = f.true_path.clone();
+                }
+                None => {
+                    reply.error(ENOENT);
+                    return;
+                },
+            };
+
+
+            let mut attr = FileAttr::from_target( real_path.as_path() ).unwrap();
+            attr.ino = ino;
+            let ttl = Timespec::new(1, 0);
+            reply.attr(&ttl, &attr);
         }
+    }
+
+    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen){
+        reply.opened(0,0);
     }
 
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
@@ -392,7 +415,7 @@ impl Filesystem for MutagenFilesystem {
         }
     }
 
-    fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, size: u32, reply: ReplyData) {
+    fn read(&mut self, req: &Request, ino: u64, fh: u64, offset: u64, size: u32, reply: ReplyData) {
         // Having this inode, we can resolve it to a real path if it's a file
         if self.is_file(ino) {
             let real_path : PathBuf;
@@ -406,15 +429,20 @@ impl Filesystem for MutagenFilesystem {
                 },
             };
             let mut f = File::open(real_path.as_path()).unwrap();
-            let mut bytes : Vec<u8> = vec!();
-            let read = f.read_to_end( &mut bytes );
-            // Push a null terminator, as most things get mad if it isn't there
-            bytes.push('\0' as u8);
-            reply.data(bytes.as_slice());
-            return;
+             let mut bytes : Vec<u8> = vec!();
+
+             let read = f.read_to_end( &mut bytes ).unwrap();
+
+             reply.data(&bytes.as_slice()[offset as usize..]);
+
         }else if self.is_dir( ino ) {
             reply.error(ENOENT);
         }
+    }
+
+    fn release(&mut self, req: &Request, ino: u64, fh: u64, flags: u32, lock_owner: u64, flush: bool, reply: ReplyEmpty){
+        // Ideally, we'll check to ensure nobody's using this, but whatever
+        reply.ok();
     }
 
     fn readdir(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, mut reply: ReplyDirectory) {
@@ -444,12 +472,12 @@ pub fn mount_fs() {
     fs.inject(Path::new("/home/spooky/dev/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
     fs.inject(Path::new("/home/spooky/dev/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
 
-    println!("{:?}", fs.read_dir_by_ino(1));
+    // println!("{:?}", fs.read_dir_by_ino(1));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system/fuse_logic.py")));
     // println!("{:?}", fs.lookup(Path::new("python_fuse_system")));
 
     let mountpoint = "./mount";
-
-    fuse::mount(fs, &mountpoint, &[]).expect("Couldn't mount filesystem");
+    let debug = OsString::from("debug".to_string());
+    fuse::mount(fs, &mountpoint, &[&debug]).expect("Couldn't mount filesystem");
 }
 
