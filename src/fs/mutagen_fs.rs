@@ -161,13 +161,13 @@ impl MutagenFilesystem {
         }
 
         // Get the DirEntry represented by this ino
-        // Insert a new record into the DirEntry. If it already exists,
-        // there's a conflict
+        // Insert a new record into the DirEntry. If it already exists, there's
+        // a shared dir
         match self.dir_vfs.entry(parent_ino) {
             Occupied(mut d) => {
                 let parent = d.get_mut();
                 match parent.entries.entry(name){
-                    Occupied(o) => panic!("File conflict"),
+                    Occupied(o) => (),
                     Vacant(v) => {
                         let e = Entry{
                             ino : self.ino_counter,
@@ -463,21 +463,5 @@ impl Filesystem for MutagenFilesystem {
 
         reply.ok();
     }
-}
-
-#[cfg(target_family="unix")]
-pub fn mount_fs() {
-    let mut fs = MutagenFilesystem::new();
-
-    fs.inject(Path::new("/home/spooky/dev/mutagen/pkg"), Tag{owner_name: "test".to_string(), owner_version: "1.0".to_string()});
-    fs.inject(Path::new("/home/spooky/dev/mutagen/old_work"), Tag{owner_name: "test2".to_string(), owner_version: "1.0".to_string()});
-
-    // println!("{:?}", fs.read_dir_by_ino(1));
-    // println!("{:?}", fs.lookup(Path::new("python_fuse_system/fuse_logic.py")));
-    // println!("{:?}", fs.lookup(Path::new("python_fuse_system")));
-
-    let mountpoint = "./mount";
-    let debug = OsString::from("debug".to_string());
-    fuse::mount(fs, &mountpoint, &[&debug]).expect("Couldn't mount filesystem");
 }
 

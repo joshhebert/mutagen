@@ -1,0 +1,10 @@
+[metadata]
+name    = "vim"
+version = "7.4.1386-1"
+
+[depends]
+    [depends.vim-runtime]
+        name = "vim-runtime"
+        minversion = "7.4.1386-1"
+        maxversion = "7.4.1386-1"
+

@@ -1,0 +1,5 @@
+[metadata]
+name    = "vim-runtime"
+version = "7.4.1386-1"
+
+[depends]

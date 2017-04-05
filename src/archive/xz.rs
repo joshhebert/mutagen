@@ -25,6 +25,7 @@ use self::tar::Header;
 
 use self::lzma::LzmaReader;
 
+// TODO from_path should be a &Path
 pub fn extract_xz( from_path : String, to_path : &Path ) {
     // Read in the xz compressed file
     let f = File::open( &from_path ).unwrap( );
