@@ -153,7 +153,7 @@ impl MutagenFilesystem {
 
     fn map_inode( &mut self, parent_dir : PathBuf, entry_type : Type, name : OsString ) -> u64 {
         // Figure out what the ino of the parent dir is
-        println!("Mapping {:?} into {:?}", name, parent_dir );
+        // println!("Mapping {:?} into {:?}", name, parent_dir );
         let parent_ino : u64;
         match self.mapping.entry(parent_dir) {
             Occupied(mut o) => parent_ino = o.get_mut().clone(),
@@ -190,7 +190,7 @@ impl MutagenFilesystem {
         let ino = self.map_inode( parent_dir.clone(), Type::Dir, name.clone() );
 
         let full_path = &parent_dir.join(Path::new(&name));
-        println!("Inserting {:?} into mapping", full_path);
+        // println!("Inserting {:?} into mapping", full_path);
         self.mapping.insert( full_path.clone(), ino );
 
         match self.dir_vfs.entry(ino) {

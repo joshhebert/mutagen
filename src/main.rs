@@ -49,4 +49,7 @@ fn main() {
     // Launch the vfs
     let mountpoint = "./root/mutagen/vfs";
     fuse::mount(fs, &mountpoint, &[]).expect("Couldn't mount filesystem");
+
+    // The last step is to overlay the vfs onto the real filesystem
+    // TODO
 }
